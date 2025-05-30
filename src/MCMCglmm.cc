@@ -2319,30 +2319,78 @@ if(thetaS){
             linki[k]->x[i] = linky->x[record];
             predi[k]->x[i] =  pred->x[record];
          }
-  
-         if(mvtype[cnt+j]==1){         // can be Gibbsed  
-           cs_ltsolve(GinvL[k]->L, linki_tmp[k]->x);  
-           for(i=0; i<dimG; i++){
-             linky->x[nlGR[k]*i+j+cnt2] = linki_tmp[k]->x[i]+predi[k]->x[i];
+
+         if(mvtype[cnt+j]==1){         // can be Gibbsed
+           // ORIGINAL CODE:
+           /*
+           cs_ltsolve(GinvL[k]->L, linki_tmp[k]->x);  // linki_tmp[k]->x was N(0,I), now effectively N(0, G[k])
+           for(int i_dim=0; i_dim<dimG; i_dim++){ // Original loop variable was 'i', changed to 'i_dim' for clarity
+             linky->x[nlGR[k]*i_dim+j+cnt2] = linki_tmp[k]->x[i_dim]+predi[k]->x[i_dim];
            }
+           */
+
+           // --- MODIFIED CODE START ---
+           if (dimG == 1) { // If this block of the R-structure is univariate
+               double mean_val = predi[k]->x[0]; // Predicted mean for this liability
+               double variance_val = G[k]->x[0]; // Residual variance for this component (G[k] is R-variance matrix here)
+               double sd_val = (variance_val > 0.0) ? sqrt(variance_val) : 1.0; // Ensure SD is positive, fallback to 1.0 if variance is not positive (should not happen if VCV sampling is correct)
+               
+               double lower_bound = 1e-9; // Define a small positive lower bound to ensure positivity
+                                           // DBL_MAX (from <cfloat> or <float.h>) can be used as upper bound for one-sided truncation
+               
+               // Sample the liability from a normal distribution truncated to be positive
+               linky->x[nlGR[k]*0+j+cnt2] = rtnorm(mean_val, sd_val, lower_bound, DBL_MAX);
+
+           } else { 
+               // Multivariate residual block (dimG > 1):
+               // Implementing a truly multivariate truncated normal sampler here is complex.
+               // The original logic samples from the untruncated conditional multivariate normal.
+               // Forcing positivity here might involve sampling each component conditionally and truncating,
+               // or applying a transformation strategy. For simplicity, using original logic here.
+               // A crude (and statistically problematic) approach would be to clip after sampling.
+               cs_ltsolve(GinvL[k]->L, linki_tmp[k]->x);
+               for(int i_dim=0; i_dim<dimG; i_dim++){
+                   linky->x[nlGR[k]*i_dim+j+cnt2] = linki_tmp[k]->x[i_dim]+predi[k]->x[i_dim];
+                   // Example of a crude clip (use with extreme caution, distorts distribution):
+                   /*
+                   double lower_bound = 1e-9;
+                   if (linky->x[nlGR[k]*i_dim+j+cnt2] < lower_bound) {
+                       linky->x[nlGR[k]*i_dim+j+cnt2] = lower_bound;
+                   }
+                   */
+               }
+           }
+           // --- MODIFIED CODE END ---
+           
+           // The 'if(path)' block that updates 'linky_orig' based on 'linky->x' might also need attention
+           // if 'linky_orig' must also be strictly positive after its transformation involving Lambda.
+           // The operations involving Lambda (cs_lsolve, cs_usolve) might not preserve positivity
+           // if Lambda or its inverse has negative elements, even if the input 'linky->x' values are positive.
+           // A simple clip on linky_orig->x[...] after its calculation within the if(path) block might be
+           // a pragmatic, albeit imperfect, approach if strict positivity is required there.
            if(path){
-  
-             for(i=0; i<dimG; i++){
-               linki_tmp2[k]->x[i] = 0.0;
-               linki_tmp[k]->x[i] = linki_tmp[k]->x[i]+predi[k]->x[i];
+             // Original logic for updating linky_orig from the new linky->x values:
+             for(int i_dim=0; i_dim<dimG; i_dim++){
+               linki_tmp[k]->x[i_dim] = linky->x[nlGR[k]*i_dim+j+cnt2]; // Use the newly sampled (potentially positive) liability
              }
-  
-             cs_ipvec (LambdaLU[lambda_old]->pinv, linki_tmp[k]->x, linki_tmp2[k]->x, dimG);	 
-             cs_lsolve(LambdaLU[lambda_old]->L, linki_tmp2[k]->x);                              
-             cs_usolve (LambdaLU[lambda_old]->U, linki_tmp2[k]->x);		               
-             cs_ipvec (LambdaS->q, linki_tmp2[k]->x, linki_tmp[k]->x, dimG);  
-  
-             for(i=0; i<dimG; i++){
-               linky_orig->x[nlGR[k]*i+j+cnt2] = linki_tmp[k]->x[i];
+             // (LU solve operations to get linky_orig from linki_tmp[k]->x which holds the new linky values)
+             cs_ipvec (LambdaLU[lambda_old]->pinv, linki_tmp[k]->x, linki_tmp2[k]->x, dimG);
+             cs_lsolve(LambdaLU[lambda_old]->L, linki_tmp2[k]->x);
+             cs_usolve (LambdaLU[lambda_old]->U, linki_tmp2[k]->x);
+             cs_ipvec (LambdaS->q, linki_tmp2[k]->x, linki_tmp[k]->x, dimG); // result is in linki_tmp[k]->x now
+
+             for(int i_dim=0; i_dim<dimG; i_dim++){
+               linky_orig->x[nlGR[k]*i_dim+j+cnt2] = linki_tmp[k]->x[i_dim];
+               // Optionally, if linky_orig must also be strictly positive after this transformation:
+               /*
+               double lower_bound = 1e-9;
+               if (linky_orig->x[nlGR[k]*i_dim+j+cnt2] < lower_bound) {
+                  linky_orig->x[nlGR[k]*i_dim+j+cnt2] = lower_bound;
+               }
+               */
              }
            }
-         }
-  	 
+         } // End of if(mvtype[cnt+j]==1)
          if(mvtype[cnt+j]<0){         // has to be MHed
            cs_ltsolve(propCinvL[p]->L, linki_tmp[k]->x); 
 
