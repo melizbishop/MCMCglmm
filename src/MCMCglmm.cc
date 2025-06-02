@@ -2328,39 +2328,6 @@ if(thetaS){
              linky->x[nlGR[k]*i_dim+j+cnt2] = linki_tmp[k]->x[i_dim]+predi[k]->x[i_dim];
            }
            */
-
-           // --- MODIFIED CODE START ---
-           if (dimG == 1) { // If this block of the R-structure is univariate
-               double mean_val = predi[k]->x[0]; // Predicted mean for this liability
-               double variance_val = G[k]->x[0]; // Residual variance for this component (G[k] is R-variance matrix here)
-               double sd_val = (variance_val > 0.0) ? sqrt(variance_val) : 1.0; // Ensure SD is positive, fallback to 1.0 if variance is not positive (should not happen if VCV sampling is correct)
-               
-               double lower_bound = 1e-9; // Define a small positive lower bound to ensure positivity
-                                           // DBL_MAX (from <cfloat> or <float.h>) can be used as upper bound for one-sided truncation
-               
-               // Sample the liability from a normal distribution truncated to be positive
-               linky->x[nlGR[k]*0+j+cnt2] = rtnorm(mean_val, sd_val, lower_bound, DBL_MAX);
-
-           } else { 
-               // Multivariate residual block (dimG > 1):
-               // Implementing a truly multivariate truncated normal sampler here is complex.
-               // The original logic samples from the untruncated conditional multivariate normal.
-               // Forcing positivity here might involve sampling each component conditionally and truncating,
-               // or applying a transformation strategy. For simplicity, using original logic here.
-               // A crude (and statistically problematic) approach would be to clip after sampling.
-               cs_ltsolve(GinvL[k]->L, linki_tmp[k]->x);
-               for(int i_dim=0; i_dim<dimG; i_dim++){
-                   linky->x[nlGR[k]*i_dim+j+cnt2] = linki_tmp[k]->x[i_dim]+predi[k]->x[i_dim];
-                   // Example of a crude clip (use with extreme caution, distorts distribution):
-                   /*
-                   double lower_bound = 1e-9;
-                   if (linky->x[nlGR[k]*i_dim+j+cnt2] < lower_bound) {
-                       linky->x[nlGR[k]*i_dim+j+cnt2] = lower_bound;
-                   }
-                   */
-               }
-           }
-           // --- MODIFIED CODE END ---
            
            // The 'if(path)' block that updates 'linky_orig' based on 'linky->x' might also need attention
            // if 'linky_orig' must also be strictly positive after its transformation involving Lambda.
