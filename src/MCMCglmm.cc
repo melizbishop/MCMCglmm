@@ -1,4 +1,7 @@
 #include "MCMCglmmcc.h"
+#include <math.h>
+#include "cs.h"
+#include "Rmath.h"
 
 extern "C"{  
 
@@ -2835,82 +2838,104 @@ if(thetaS){
          dbar += densityl1;
   
          // Jarrod: pred and G are both still refering to Lambda%*%l so anything inolving them (e.g. slice sampling (when path(1,1) is fitted) and threshold models) need to be modified.
-  
-         if(mvtype[cnt+j]<0){
-  
-           if(path){  // convert l back to Lambda%*%l - shit coding sort it out!
-  
-             cs_spfree(linki_tmp2[k]);
-             linki_tmp2[k] = cs_multiply(Lambda[lambda_old], linki[k]);   
-             for(i=0; i<dimG; i++){
-                linki[k]->x[linki_tmp2[k]->i[i]] = linki_tmp2[k]->x[i];
-             }
-             cs_spfree(linki_tmp2[k]);
-             linki_tmp2[k] = cs_multiply(Lambda[lambda_old], linki_tmp[k]);   
-             for(i=0; i<dimG; i++){
-                linki_tmp[k]->x[linki_tmp2[k]->i[i]] = linki_tmp2[k]->x[i];
-             }
-             // don't need to worry about the Jacobian below because they cancel
-           }
+  	if(mvtype[cnt+j]<0){
 
-           densityl1 += cs_dmvnorm(linki[k], predi[k], ldet[k], Ginv[k]);
-           densityl2 += cs_dmvnorm(linki_tmp[k], predi[k], ldet[k], Ginv[k]);
+  if(path){  // convert l back to Lambda%*%l
+    cs_spfree(linki_tmp2[k]);
+    linki_tmp2[k] = cs_multiply(Lambda[lambda_old], linki[k]);   
+    for(i=0; i<dimG; i++){
+      linki[k]->x[linki_tmp2[k]->i[i]] = linki_tmp2[k]->x[i];
+    }
+    cs_spfree(linki_tmp2[k]);
+    linki_tmp2[k] = cs_multiply(Lambda[lambda_old], linki_tmp[k]);   
+    for(i=0; i<dimG; i++){
+      linki_tmp[k]->x[linki_tmp2[k]->i[i]] = linki_tmp2[k]->x[i];
+    }
+    // Jacobian cancels
+  }
 
-           zn[p] *= rACCEPT; 
-           wn[p] *= rACCEPT;
-           wn[p] ++;
-  
-  
-           if((densityl2-densityl1)>log(runif(0.0,1.0))){
-             for(i=0; i<dimG; i++){
-               linky->x[nlGR[k]*i+j+cnt2] = linki_tmp[k]->x[i];
-             }
-             if(path){
-  
-               for(i=0; i<dimG; i++){
-                 linki_tmp2[k]->x[i] = 0.0;
-               }
-  
-               cs_ipvec (LambdaLU[lambda_old]->pinv, linki_tmp[k]->x, linki_tmp2[k]->x, dimG);	 
-               cs_lsolve(LambdaLU[lambda_old]->L, linki_tmp2[k]->x);                              
-               cs_usolve (LambdaLU[lambda_old]->U, linki_tmp2[k]->x);		               
-               cs_ipvec (LambdaS->q, linki_tmp2[k]->x, linki_tmp[k]->x, dimG);  
-  
-               for(i=0; i<dimG; i++){
-                 linky_orig->x[nlGR[k]*i+j+cnt2] = linki_tmp[k]->x[i];
-               }
-             }
-             zn[p]++;
-             Eaccl[k]++;  
-           }
-  
+  densityl1 += cs_dmvnorm(linki[k], predi[k], ldet[k], Ginv[k]);
+  densityl2 += cs_dmvnorm(linki_tmp[k], predi[k], ldet[k], Ginv[k]);
+
+  // -----------------------------
+  // ✴️ Entropy Penalty Calculation
+  // -----------------------------
+  double alpha_curr[dimG];
+  double alpha_prop[dimG];
+
+  for(i = 0; i < dimG; i++) {
+    alpha_curr[i] = exp(linki[k]->x[i]);         // current alphas
+    alpha_prop[i] = exp(linki_tmp[k]->x[i]);     // proposed alphas
+  }
+
+  double entropy_curr = dirichlet_entropy(alpha_curr, dimG);
+  double entropy_prop = dirichlet_entropy(alpha_prop, dimG);
+
+  double target_entropy = 1000000;   
+  double intensity = 1000;       
+
+  double penalty_curr = entropy_penalty(target_entropy, entropy_curr, intensity);
+  double penalty_prop = entropy_penalty(target_entropy, entropy_prop, intensity);
+
+  double entropy_adjustment = penalty_prop - penalty_curr;
+
+  // Debugging (optional)
+  // Rprintf("Entropies (curr: %.3f, prop: %.3f) -> Δpenalty: %.3f\n", entropy_curr, entropy_prop, entropy_adjustment);
+
+  // ---------------------------------
+  // ✴️ Metropolis-Hastings Acceptance
+  // ---------------------------------
+  zn[p] *= rACCEPT; 
+  wn[p] *= rACCEPT;
+  wn[p] ++;
+
+  if((densityl2 - densityl1 - entropy_adjustment) > log(runif(0.0,1.0))){
+    for(i=0; i<dimG; i++){
+      linky->x[nlGR[k]*i+j+cnt2] = linki_tmp[k]->x[i];
+    }
+    if(path){
+      for(i=0; i<dimG; i++){
+        linki_tmp2[k]->x[i] = 0.0;
+      }
+
+      cs_ipvec (LambdaLU[lambda_old]->pinv, linki_tmp[k]->x, linki_tmp2[k]->x, dimG);	 
+      cs_lsolve(LambdaLU[lambda_old]->L, linki_tmp2[k]->x);                              
+      cs_usolve (LambdaLU[lambda_old]->U, linki_tmp2[k]->x);		               
+      cs_ipvec (LambdaS->q, linki_tmp2[k]->x, linki_tmp[k]->x, dimG);  
+
+      for(i=0; i<dimG; i++){
+        linky_orig->x[nlGR[k]*i+j+cnt2] = linki_tmp[k]->x[i];
+      }
+    }
+    zn[p]++;
+    Eaccl[k]++;  
+  }
+
   /***************/
   /* Adaptive MH */
   /***************/
-  
-           if(itt<burnin && AMtuneP[k]==1){
-             t[p] ++;
-             for(i=0; i<dimG; i++){
-               for(l=0; l<dimG; l++){
-                propC[p]->x[i*dimG+l] *= (t[p]-1.0)/t[p];
-                propC[p]->x[i*dimG+l] += muC[p]->x[i]*muC[p]->x[l];
-               }
-             }
-            for(i=0; i<dimG; i++){
-              muC[p]->x[i] *= (t[p]-1.0);
-              muC[p]->x[i] += linky->x[nlGR[k]*i+j+cnt2];
-              muC[p]->x[i] /= t[p];
-            }				 
-             for(i=0; i<dimG; i++){
-               for(l=0; l<dimG; l++){
-                 propC[p]->x[i*dimG+l] -= ((t[p]+1.0)/t[p])*muC[p]->x[i]*muC[p]->x[l];
-                 propC[p]->x[i*dimG+l] += linky->x[nlGR[k]*i+j+cnt2]*linky->x[nlGR[k]*l+j+cnt2]/t[p];
-               }
-               propC[p]->x[i*(dimG+1)] += 0.001/t[p];
-             }
-           }
-         }
-       }
+  if(itt<burnin && AMtuneP[k]==1){
+    t[p] ++;
+    for(i=0; i<dimG; i++){
+      for(l=0; l<dimG; l++){
+        propC[p]->x[i*dimG+l] *= (t[p]-1.0)/t[p];
+        propC[p]->x[i*dimG+l] += muC[p]->x[i]*muC[p]->x[l];
+      }
+    }
+    for(i=0; i<dimG; i++){
+      muC[p]->x[i] *= (t[p]-1.0);
+      muC[p]->x[i] += linky->x[nlGR[k]*i+j+cnt2];
+      muC[p]->x[i] /= t[p];
+    }				 
+    for(i=0; i<dimG; i++){
+      for(l=0; l<dimG; l++){
+        propC[p]->x[i*dimG+l] -= ((t[p]+1.0)/t[p])*muC[p]->x[i]*muC[p]->x[l];
+        propC[p]->x[i*dimG+l] += linky->x[nlGR[k]*i+j+cnt2]*linky->x[nlGR[k]*l+j+cnt2]/t[p];
+      }
+      propC[p]->x[i*(dimG+1)] += 0.001/t[p];
+    }
+  }
+}
        if(itt<burnin && AMtuneP[k]==1){
          for(i=0; i<dimG; i++){
            for(l=0; l<dimG; l++){
