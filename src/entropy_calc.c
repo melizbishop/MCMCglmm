@@ -11,9 +11,10 @@ double digamma(double x) {
     return result;
 }
 
-double dirichlet_entropy(double *alpha, int len) {
+double dirichlet_entropy(double *logalpha, int len) {
     double alpha0 = 0.0, entropy = 0.0;
     for (int i = 0; i < len; i++) {
+        alpha[i] = exp(logalpha[i]);
         alpha0 += alpha[i];
     }
 
@@ -29,11 +30,12 @@ double dirichlet_entropy(double *alpha, int len) {
     for (int i = 0; i < len; i++) {
         entropy += (alpha[i] - 1.0) * digamma(alpha[i]);
     }
-
+    
+    free(alpha);
     return entropy;
 }
 
-double entropy_penalty(double target_entropy, double current_entropy, double intensity) {
-    double diff = (current_entropy - target_entropy) / target_entropy;
-    return intensity * diff * diff;
+double entropy_penalty(double target, double current, double intensity) {
+    return intensity * pow((current - target) / target, 2.0);
+}
 }
