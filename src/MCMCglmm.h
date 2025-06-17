@@ -65,7 +65,6 @@ void cs_sortdv(const cs *A);
 double dcutpoints(const cs *liab, double *yP, int *observed, int start,int finish, double *oldcutopints, double *newcutopints, int stcutpoints, int ncutpoints, double sdcp, double sdl);
 /* log MH ratio of new cutpoints to old cutpoints given liabilities liab and all yP between start and finish for which observed==1. sdcp and sdl are the proposal standard deviations for cutpoints and thresholds. */
 double digamma(double x);
-/* approximate digamma function */
 double dirichlet_entropy(double *logalpha, int len);
 double entropy_penalty(double target, double current, double intensity);
 double pcmvnorm(const cs *predi, const cs *linki, const cs *G, int keep, double lower, double upper);
