@@ -66,10 +66,8 @@ double dcutpoints(const cs *liab, double *yP, int *observed, int start,int finis
 /* log MH ratio of new cutpoints to old cutpoints given liabilities liab and all yP between start and finish for which observed==1. sdcp and sdl are the proposal standard deviations for cutpoints and thresholds. */
 double digamma(double x);
 /* approximate digamma function */
-double entropy_calc(double *alpha, int len);
-/* entropy of Dirichlet(alpha_1, ..., alpha_len) */
-double entropy_penalty(double target_entropy, double current_entropy, double intensity);
-/* quadratic penalty on deviation from target entropy */
+double dirichlet_entropy(double *logalpha, int len);
+double entropy_penalty(double target, double current, double intensity);
 double pcmvnorm(const cs *predi, const cs *linki, const cs *G, int keep, double lower, double upper);
 /* log cumlative distribution function between lower and upper for variable[keep] conditioning on linki[-keep]
 linki is multivariate normal with mean predi and covariance G */
