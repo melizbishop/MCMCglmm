@@ -1,0 +1,10 @@
+PKG_CFLAGS = -Wall
+PKG_CXXFLAGS = -Wall
+
+SOURCES = MCMC.cc entropy_calc.c
+OBJECTS = $(SOURCES:.c=.o)
+
+all: $(SHLIB)
+
+$(SHLIB): $(OBJECTS)
+    $(CC) -shared -o $@ $(OBJECTS) $(LDFLAGS)
