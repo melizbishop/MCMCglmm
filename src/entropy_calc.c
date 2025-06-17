@@ -1,3 +1,4 @@
+#include "MCMCglmm.h"
 
 double entropy_calc(double* alpha, int len) {
     double alpha0 = 0.0;
