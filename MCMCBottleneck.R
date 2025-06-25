@@ -7,18 +7,11 @@ library(ape)
 library(Matrix)
 library(parallel)
 
-library(devtools)
-load_all('.')
-
 # ---Global parameters
 Nb = 12 #number of behaviors
 
-# ---Set the output file
-# sink("ancestral0.out")
-
 # ---Defining phylogeny -> pedigree variable for MCMCglmm
 tt="((yakuba:0.09,santomea:0.09)oldyasa:0.44,((sechelia:0.15,simulans:0.15,mauritiana:0.15)oldsim:0.14,melanogaster:0.29)oldmela:0.24);"
-
 
 flytree<-read.tree(text=tt)
 LFlydat <- read.table("/Users/meganbishop/MCMCglmm/log_bottleneck_alphas.txt", header=TRUE, sep="", row.names="id")
