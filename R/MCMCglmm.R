@@ -1536,11 +1536,9 @@ output<-.C("MCMCglmm",
   as.double(unlist(lapply(me_prior_prob, c))),   
   as.double(unlist(lapply(me_Xi, c))),     
   as.integer(c(nme, stme-1, nmec, nmei, nmeo)),
-  # --- START OF NEW ARGUMENTS TO ADD ---
-  as.double(entropy_target_val),       # Your new target entropy value
-  as.double(entropy_intensity_val),    # Your new intensity value
-  as.integer(use_entropy_penalty)      # Your flag to enable/disable the penalty
-  # --- END OF NEW ARGUMENTS TO ADD ---
+  as.double(entropy_target_val),       # target entropy value
+  as.double(entropy_intensity_val),    # lagrange
+  as.integer(use_entropy_penalty)      # penalty switch
   )
 
 Sol<-t(matrix(output[[27]], sum((nfl*nrl)[1:nG])*pr+dim(X)[2], nkeep))
