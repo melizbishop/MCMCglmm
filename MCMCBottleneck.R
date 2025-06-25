@@ -14,7 +14,7 @@ Nb = 12 #number of behaviors
 tt="((yakuba:0.09,santomea:0.09)oldyasa:0.44,((sechelia:0.15,simulans:0.15,mauritiana:0.15)oldsim:0.14,melanogaster:0.29)oldmela:0.24);"
 
 flytree<-read.tree(text=tt)
-LFlydat <- read.table("/Users/meganbishop/MCMCglmm/log_bottleneck_alphas.txt", header=TRUE, sep="", row.names="id")
+LFlydat <- read.table("/Users/meganbishop/Desktop/log_bottleneck_alphas.txt", header=TRUE, sep="", row.names="id")
 # ---Defining prior
 # non-informative prior
 IJ <- (1/(Nb+1))*(diag(Nb)+matrix(1,Nb,Nb))
