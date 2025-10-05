@@ -1,5 +1,19 @@
 #include "MCMCglmmcc.h"
 
+static inline double dirichlet_entropy_bits_from_logalpha(const double *logalpha, int dim){
+    double alpha0 = 0.0;
+    for (int i = 0; i < dim; ++i) alpha0 += exp(logalpha[i]);
+    if (alpha0 <= 0.0 || dim < 2) return 0.0;
+
+    double term = 0.0;
+    double alpha0p1 = alpha0 + 1.0;
+    for (int i = 0; i < dim; ++i){
+        double ai = exp(logalpha[i]);
+        term += ((ai + 1.0) / alpha0p1) * digamma(ai + 1.0);
+    }
+    double H_nats = digamma(alpha0 + 1.0) - term;
+    return H_nats / M_LN2;
+}
 extern "C"{  
 
 /***************************************************************************************************/
@@ -2840,7 +2854,30 @@ if(thetaS){
 
            densityl1 += cs_dmvnorm(linki[k], predi[k], ldet[k], Ginv[k]);
            densityl2 += cs_dmvnorm(linki_tmp[k], predi[k], ldet[k], Ginv[k]);
+		   // === Entropy target penalty ===
+if (dimG >= 2) {
+    const double *loga_curr = linki[k]->x;
+    const double *loga_prop = linki_tmp[k]->x;
 
+    double H_curr_bits = dirichlet_entropy_bits_from_logalpha(loga_curr, dimG);
+    double H_prop_bits = dirichlet_entropy_bits_from_logalpha(loga_prop, dimG);
+
+    double Htgt_bits = H_target[j];      // provide this vector from R
+    double lambda_entropy = lambdaH;     // scalar weight from R
+
+    double pen_curr = -lambda_entropy * pow(H_curr_bits - Htgt_bits, 2.0);
+    double pen_prop = -lambda_entropy * pow(H_prop_bits - Htgt_bits, 2.0);
+
+    densityl1 += pen_curr;
+    densityl2 += pen_prop;
+
+    // accumulate for debug printing
+    dbg_sum_H_curr_bits += H_curr_bits;
+    dbg_sum_H_prop_bits += H_prop_bits;
+    dbg_sum_pen_curr += pen_curr;
+    dbg_sum_pen_prop += pen_prop;
+    dbg_entropy_evals += 1;
+}
            zn[p] *= rACCEPT; 
            wn[p] *= rACCEPT;
            wn[p] ++;
@@ -3064,34 +3101,60 @@ if(thetaS){
 /*  store posterior   */
 /***********************/
 
-   if(itt%1000 == 0){
-       if(verboseP[0]){
-         Rprintf("\n                       MCMC iteration = %i\n",itt);
-         for(i=nG; i<nGR; i++){
-           if(nMH[i]>0){
-                                              
-             Rprintf("\n Acceptance ratio for liability set %i = %f\n", i+1-nG, Eaccl[i]/(nMH[i]*1000.0));
-           }
-         }
-         if(cp){
-           for(i=0; i<nordinal; i++){
-             Rprintf("\n     Acceptance ratio for cutpoint set %i = %f\n", i+1, accp[i]/1000.0);
-           }
-         }
-         R_FlushConsole();
-         R_ProcessEvents();
-      }
-      for(i=nG; i<nGR; i++){
-        if(nMH[i]>0){
-          Eaccl[i] = 0.0;
+if (itt % 1000 == 0) {
+    if (verboseP[0]) {
+        Rprintf("\n                       MCMC iteration = %i\n", itt);
+
+        /* ---------- ENTROPY DEBUG PRINT ---------- */
+        if (dbg_entropy_evals > 0) {
+            double div = (double) dbg_entropy_evals;
+            Rprintf("  [Entropy dbg] avg H_curr(bits): %.6f | avg H_prop(bits): %.6f\n",
+                    dbg_sum_H_curr_bits / div, dbg_sum_H_prop_bits / div);
+            Rprintf("  [Entropy dbg] avg penalty curr: %.6f | avg penalty prop: %.6f (lambdaH=%.6f)\n",
+                    dbg_sum_pen_curr / div, dbg_sum_pen_prop / div, (double)lambdaH);
+        } else {
+            Rprintf("  [Entropy dbg] no entropy evaluations (dimG<2 skipped)\n");
         }
-      }
-      if(cp){
-        for(i=0; i<nordinal; i++){
-          accp[i] = 0.0;
+        /* ------------------------------------------ */
+
+        for (i = nG; i < nGR; i++) {
+            if (nMH[i] > 0) {
+                Rprintf("\n Acceptance ratio for liability set %i = %f\n",
+                        i + 1 - nG, Eaccl[i] / (nMH[i] * 1000.0));
+            }
         }
-      }
-   }
+
+        if (cp) {
+            for (i = 0; i < nordinal; i++) {
+                Rprintf("\n     Acceptance ratio for cutpoint set %i = %f\n",
+                        i + 1, accp[i] / 1000.0);
+            }
+        }
+
+        R_FlushConsole();
+        R_ProcessEvents();
+    }
+
+    /* reset acceptance counters */
+    for (i = nG; i < nGR; i++) {
+        if (nMH[i] > 0) {
+            Eaccl[i] = 0.0;
+        }
+    }
+
+    if (cp) {
+        for (i = 0; i < nordinal; i++) {
+            accp[i] = 0.0;
+        }
+    }
+
+    /* reset entropy debug accumulators for next window */
+    dbg_sum_H_curr_bits = 0.0;
+    dbg_sum_H_prop_bits = 0.0;
+    dbg_sum_pen_curr = 0.0;
+    dbg_sum_pen_prop = 0.0;
+    dbg_entropy_evals = 0;
+}
 
    if(itt>=burnin && DICP[0]==1){
      mdbar *= (itt-burnin);
