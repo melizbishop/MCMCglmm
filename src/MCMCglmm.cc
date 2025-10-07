@@ -1,5 +1,26 @@
 #include "MCMCglmmcc.h"
 
+double lambdaH_nats  = 0.25;              // start small; tune 0.05–0.5
+double H_target_nats = 0.8 * log(134.0);  // ~60% of max entropy for K=134
+
+// ===== Shannon entropy of Dirichlet SAMPLE p = alpha/alpha0, from log-alpha =====
+static inline double shannon_entropy_from_logalpha_nats(const double *logalpha, int K){
+    // stable log-sum-exp to get log(alpha0)
+    double m = -INFINITY;
+    for (int i = 0; i < K; ++i) if (logalpha[i] > m) m = logalpha[i];
+    double sumexp = 0.0;
+    for (int i = 0; i < K; ++i) sumexp += exp(logalpha[i] - m);
+    const double lse = m + log(sumexp);  // = log(alpha0)
+    // H(p) = -sum_i p_i log p_i, with p_i = exp(logalpha_i - lse)
+    double H = 0.0;
+    for (int i = 0; i < K; ++i){
+        const double logpi = logalpha[i] - lse;     // log p_i
+        const double pi    = exp(logpi);            // p_i
+        if (!(pi > 0.0)) continue;                  // ultra-rare guard
+        H -= pi * logpi;                            // nats
+    }
+    return H;
+}
 extern "C"{  
 
 /***************************************************************************************************/
@@ -2840,10 +2861,56 @@ if(thetaS){
 
            densityl1 += cs_dmvnorm(linki[k], predi[k], ldet[k], Ginv[k]);
            densityl2 += cs_dmvnorm(linki_tmp[k], predi[k], ldet[k], Ginv[k]);
+
+           /* ===== Entropy penalty (Shannon of Dirichlet sample p = alpha/alpha0) =====
+              Bake into the densities BEFORE the accept/reject so MH uses augmented energy.
+              Uses logalpha vectors stored in linki[k]->x[0..dimG-1] and linki_tmp[k]->x[...].
+              All units in NATs to match the rest of the log-likelihood.
+           */
+           extern double lambdaH_nats;   // set elsewhere (>= 0 to enable)
+           extern double H_target_nats;  // set elsewhere (e.g., in [0, log(K)])
+
+           if (lambdaH_nats > 0.0){
+             const int K = dimG;
+
+             // --- current state entropy H_curr ---
+             double m1 = -INFINITY;
+             for (i = 0; i < K; ++i) if (linki[k]->x[i] > m1) m1 = linki[k]->x[i];
+             double sumexp1 = 0.0;
+             for (i = 0; i < K; ++i) sumexp1 += exp(linki[k]->x[i] - m1);
+             const double lse1 = m1 + log(sumexp1); // = log(alpha0_curr)
+             double H_curr = 0.0;
+             for (i = 0; i < K; ++i){
+               const double logpi = linki[k]->x[i] - lse1;   // log p_i
+               const double pi    = exp(logpi);              // p_i
+               if (pi > 0.0) H_curr -= pi * logpi;           // accumulate in NATs
+             }
+
+             // --- proposed state entropy H_prop ---
+             double m2 = -INFINITY;
+             for (i = 0; i < K; ++i) if (linki_tmp[k]->x[i] > m2) m2 = linki_tmp[k]->x[i];
+             double sumexp2 = 0.0;
+             for (i = 0; i < K; ++i) sumexp2 += exp(linki_tmp[k]->x[i] - m2);
+             const double lse2 = m2 + log(sumexp2); // = log(alpha0_prop)
+             double H_prop = 0.0;
+             for (i = 0; i < K; ++i){
+               const double logpi = linki_tmp[k]->x[i] - lse2; // log p_i
+               const double pi    = exp(logpi);                // p_i
+               if (pi > 0.0) H_prop -= pi * logpi;             // NATs
+             }
+
+             const double Eent_curr = lambdaH_nats * (H_curr - H_target_nats) * (H_curr - H_target_nats);
+             const double Eent_prop = lambdaH_nats * (H_prop - H_target_nats) * (H_prop - H_target_nats);
+
+             // bake into densities so (densityl2 - densityl1) reflects augmented ΔE
+             densityl1 -= Eent_curr;
+             densityl2 -= Eent_prop;
+           }
+           /* ===== end entropy penalty injection ===== */
+
            zn[p] *= rACCEPT; 
            wn[p] *= rACCEPT;
            wn[p] ++;
-  
   
            if((densityl2-densityl1)>log(runif(0.0,1.0))){
              for(i=0; i<dimG; i++){
@@ -3066,6 +3133,8 @@ if(thetaS){
 if (itt % 1000 == 0) {
     if (verboseP[0]) {
         Rprintf("\n                       MCMC iteration = %i\n", itt);
+            Rprintf("\n Entropy penalty (lambdaH = %.4f):", lambdaH_nats);
+            Rprintf("\n   Target H* = %.4f nats", H_target_nats);
         for (i = nG; i < nGR; i++) {
             if (nMH[i] > 0) {
                 Rprintf("\n Acceptance ratio for liability set %i = %f\n",
@@ -3097,12 +3166,6 @@ if (itt % 1000 == 0) {
         }
     }
 
-    /* reset entropy debug accumulators for next window */
-    dbg_sum_H_curr_bits = 0.0;
-    dbg_sum_H_prop_bits = 0.0;
-    dbg_sum_pen_curr = 0.0;
-    dbg_sum_pen_prop = 0.0;
-    dbg_entropy_evals = 0;
 }
 
    if(itt>=burnin && DICP[0]==1){
